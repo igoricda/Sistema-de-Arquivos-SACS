@@ -7,6 +7,7 @@
 struct superblock {
     unsigned sysid;
     unsigned short sector_size;
+    unsigned sector_count;
     unsigned total_blocks;
     unsigned short block_size;
     unsigned bitmap_start;
@@ -14,7 +15,8 @@ struct superblock {
     unsigned root_start;
     unsigned root_size;
     unsigned data_start;
-    char reserved[32];
+    unsigned blocks_per_sector;
+    char reserved[24];
 };
 
 struct dir_entry{
@@ -29,12 +31,11 @@ struct dir_entry{
 void main(){
     struct superblock sup;
     sup.sysid = 1;
-    unsigned sector_count;
-    scanf("%u", &sector_count);
+    scanf("%u", &sup.sector_count);
     sup.sector_size = 9;
     sup.block_size = 2;
-    unsigned blocks_per_sector = (sup.sector_size << sup.block_size) / sup.sector_size;
-    sup.total_blocks = ceil(sector_count / blocks_per_sector);  
+    sup.blocks_per_sector = (sup.sector_size << sup.block_size) / sup.sector_size;
+    sup.total_blocks = ceil(sup.sector_count / sup.blocks_per_sector);  
     sup.bitmap_start = 1;
     sup.bitmap_size = (sup.total_blocks/(2<<(sup.sector_size-1)<<sup.block_size))+1;
     sup.root_start = sup.bitmap_start + sup.bitmap_size;
