@@ -15,7 +15,7 @@ struct superblock {
     unsigned root_start;
     unsigned root_size;
     unsigned data_start;
-    unsigned blocks_per_sector;
+    unsigned sectors_per_block;
     char reserved[24];
 };
 
@@ -34,18 +34,20 @@ void main(){
     scanf("%u", &sup.sector_count);
     sup.sector_size = 9;
     sup.block_size = 2;
-    sup.blocks_per_sector = (sup.sector_size << sup.block_size) / sup.sector_size;
-    sup.total_blocks = ceil(sup.sector_count / sup.blocks_per_sector);  
+    sup.sectors_per_block = (1 << sup.block_size) ;
+    sup.total_blocks = (sup.sector_count + (sup.sectors_per_block-1)) / sup.sectors_per_block;  
     sup.bitmap_start = 1;
-    sup.bitmap_size = (sup.total_blocks/(2<<(sup.sector_size-1)<<sup.block_size))+1;
+    sup.bitmap_size = (sup.total_blocks/(1<<(sup.sector_size)<<sup.block_size))+1;
     sup.root_start = sup.bitmap_start + sup.bitmap_size;
     sup.root_size = 4;
     sup.data_start = sup.root_start + sup.root_size;
 
     printf("Sysid = %u\n", sup.sysid);
-    printf("Sector_size = %hu =  %u \n", sup.sector_size, 2 << (sup.sector_size-1));
+    printf("Sector_size = %hu =  %u \n", sup.sector_size, 1 << (sup.sector_size));
+    printf("Sector_Count = %u\n", sup.sector_count);
+    printf("Sectors per block = %u\n", sup.sectors_per_block);
     printf("Total Blocks = %u\n", sup.total_blocks);
-    printf("Block size = %hu = %u\n", sup.block_size, (2 << (sup.sector_size-1)) << sup.block_size);
+    printf("Block size = %hu = %u\n", sup.block_size, (1 << (sup.sector_size)) << sup.block_size);
     printf("Bitmap Start = %u\n", sup.bitmap_start);
     printf("Bitmap Size = %u\n", sup.bitmap_size);
     printf("Root Start = %u\n", sup.root_start);
