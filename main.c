@@ -3,6 +3,7 @@
 #include <math.h>
 #include <string.h>
 #include <limits.h>
+#include <errno.h> 
 
 #define ENTRY_SIZE 32
 #define directory_entry 0x0001
@@ -51,20 +52,6 @@ int get_bit(unsigned char *bitmap, int index) {
 }
 
 
-void build_superblock (struct superblock *sup, unsigned int sysid, unsigned sector_count, unsigned short sector_size, unsigned short block_size, unsigned int root_size){
-    sup->sysid = sysid;
-    sup->sector_count = sector_count;
-    sup->sector_size = sector_size;
-    sup->block_size = block_size;
-    sup->sectors_per_block = (1 << sup->block_size) ;
-    sup->total_blocks = (sup->sector_count + (sup->sectors_per_block-1)) / sup->sectors_per_block;  
-    sup->bitmap_start = 1;
-    sup->bitmap_size = (sup->total_blocks/(1<<(sup->sector_size)<<sup->block_size))+1;
-    sup->root_start = sup->bitmap_start + sup->bitmap_size;
-    sup->root_size = root_size;
-    sup->data_start = sup->root_start + sup->root_size;         
-}
-
 void print_sup(struct superblock *sup){
     
     printf("Sysid = %u\n", sup->sysid);
@@ -81,58 +68,6 @@ void print_sup(struct superblock *sup){
 }
 
 
-void format_sacs(unsigned int sysid, unsigned sector_count, unsigned short sector_size, unsigned short block_size, unsigned int root_size){
-    struct superblock sup;
-    memset(&sup, 0, sizeof(struct superblock));
-    build_superblock(&sup, sysid, sector_count, sector_size, block_size, root_size);
-    print_sup(&sup);
-    printf("Size of SuperBlock = %lu\nSize of DirEntry = %lu\n",
-            sizeof(struct superblock), sizeof(struct dir_entry));
-
-
-    FILE *fp = fopen("sacs.img", "wb");
-    if (!fp) {
-        perror("Erro ao criar arquivo");
-        return;
-    }
-
-    printf("Arquivo criado\n");
-    unsigned int real_block_size = (1 << (sup.sector_size)) << sup.block_size;
-    unsigned char *buffer = calloc(1, real_block_size);
-    memcpy(buffer, &sup, sizeof(struct superblock));
-    fwrite(buffer, real_block_size , 1, fp);
-    unsigned int metadata_blocks = 1 + sup.bitmap_size + sup.root_size;
-
-    // Limpa o buffer para usar no bitmap
-    memset(buffer, 0, real_block_size);
-
-    for (unsigned int i = 0; i < metadata_blocks; i++) {
-        set_bit(buffer, i);
-        printf("set bits\n");
-    }
-    
-    fwrite(buffer, sup.bitmap_size, 1, fp);
-
-
-    memset(buffer, 0, real_block_size);
-    for (unsigned int i = 0; i < sup.root_size; i++) {
-        fwrite(buffer, real_block_size, 1, fp);
-        printf("write root\n");
-    }
-
-    unsigned int data_blocks = sup.total_blocks - sup.data_start;
-    printf("data blocks = %d\n", data_blocks);
-    memset(buffer, 0, real_block_size);
-    
-    for (unsigned int i = 0; i < data_blocks; i++) {
-        fwrite(buffer, real_block_size, 1, fp);
-        printf("data write %d\n", data_blocks -i);
-    }
-
-    fclose(fp);
-    free(buffer);
-    printf("Arquivo sacs.img criado com sucesso!\n");
-}
 
 struct superblock read_super_block(FILE *fp){
     struct superblock  superblock;
@@ -144,11 +79,14 @@ struct superblock read_super_block(FILE *fp){
 
 
 
-unsigned contiguous_alloc(FILE *fp, unsigned file_size, unsigned block_size, unsigned bitmap_start,
+unsigned contiguous_alloc(unsigned file_size, unsigned block_size, unsigned bitmap_start,
                       unsigned total_blocks){
     unsigned blocks_needed = (file_size + block_size - 1) / block_size;
     if(blocks_needed == 0) return -1;
     
+
+    FILE *fp;
+    fp= fopen("./sacs.img", "r+b");
 
     unsigned bitmap_byte_count = (total_blocks + 7) / 8;
     unsigned char *bitmap = (unsigned char *)malloc(bitmap_byte_count);
@@ -209,10 +147,12 @@ unsigned contiguous_alloc(FILE *fp, unsigned file_size, unsigned block_size, uns
     }
 
     free(bitmap);
+    fclose(fp);
+
     return best_start;
 }
 
-void create_dir_entry(struct dir_entry *entry, char file_name[17], unsigned short file_type, 
+void create_dir_entry(struct dir_entry *entry, char *file_name, unsigned short file_type, 
                       unsigned size, unsigned start_block, unsigned block_size){
     
     entry->status = 1;
@@ -223,32 +163,51 @@ void create_dir_entry(struct dir_entry *entry, char file_name[17], unsigned shor
     entry->length_in_blocks = (size + block_size - 1) / block_size;
 }
 
-void create_dir(FILE *fp, struct superblock *sup, char file_name[17], unsigned size){
+void create_dir(FILE *fp, unsigned parent_start, unsigned parent_size, struct superblock *sup, char *file_name, unsigned size){
     struct dir_entry entry;
     memset(&entry, 0, sizeof(struct dir_entry));
-    unsigned file_start = contiguous_alloc(fp, size, 1 >> sup->sector_size >> sup->block_size, 
-                                           sup->bitmap_start, sup->total_blocks);
+    unsigned real_block_size = 1 >> sup->sector_size >> sup->block_size;
+    unsigned file_start = contiguous_alloc(size, real_block_size, sup->bitmap_start, sup->total_blocks);
     
+    if(file_start == -1){
+        fprintf(stderr, "Erro na alocação contigua\n");
+        exit(EXIT_FAILURE);
+
+    }
+
+
+    create_dir_entry(&entry, file_name, directory_entry, size, file_start, real_block_size);
+    fwrite(&entry, 1, ENTRY_SIZE, fp);  
+    memset(&entry, 0, sizeof(struct dir_entry));
     //Setar fp no inicio de onde tem que escrever
-    //criar entradas ./ e ../ nos blocos de dados indicados no bitmap
+    fseek(fp, real_block_size * file_start, SEEK_SET);
     
+    //criar entradas ./ e ../ nos blocos de dados indicados no bitmap
+    create_dir_entry(&entry, ".", directory_entry, size, file_start, real_block_size);
+    fwrite(&entry, 1, ENTRY_SIZE, fp);  
+    memset(&entry, 0, sizeof(struct dir_entry));
 
-
+    create_dir_entry(&entry, "..", directory_entry, parent_size, parent_start, real_block_size);
+    fwrite(&entry, 1, ENTRY_SIZE, fp);  
+    
 
 
 }
 
+
 void create_file(){}
 
 void main(){
-    format_sacs(1, 80, 9, 2, 4);
 
     FILE *fp;
 
-    fp= fopen("./sacs.img", "rb");
-    struct superblock  superblock = read_super_block(fp);
-    print_sup(&superblock);
+    fp= fopen("./sacs.img", "r+b");
+    struct superblock  sup = read_super_block(fp);
+    print_sup(&sup);
+    unsigned real_block_size = 1 << sup.sector_size << sup.block_size;
     //Criar diretorio raiz com ./ e ../ levando a si mesmo
+ 
+    fclose(fp);
 
 
 
