@@ -163,8 +163,10 @@ void create_dir_entry(struct dir_entry *entry, char *file_name, unsigned short f
     entry->length_in_blocks = (size + block_size - 1) / block_size;
 }
 
-void create_dir(FILE *fp, unsigned parent_start, unsigned parent_size, struct superblock *sup, char *file_name, unsigned size){
+void create_dir(FILE *fp, struct dir_entry *parent_dir, struct superblock *sup, char *file_name, unsigned size){
     struct dir_entry entry;
+    parent_dir->size += size;
+
     memset(&entry, 0, sizeof(struct dir_entry));
     unsigned real_block_size = 1 >> sup->sector_size >> sup->block_size;
     unsigned file_start = contiguous_alloc(size, real_block_size, sup->bitmap_start, sup->total_blocks);
@@ -195,7 +197,8 @@ void create_dir(FILE *fp, unsigned parent_start, unsigned parent_size, struct su
 }
 
 
-void create_file(){}
+void create_file(FILE *fp, struct dir_entry *parent_dir, struct superblock *sup, char *file_name, unsigned size, 
+                    char *data){}
 
 void main(){
 
@@ -205,7 +208,7 @@ void main(){
     struct superblock  sup = read_super_block(fp);
     print_sup(&sup);
     unsigned real_block_size = 1 << sup.sector_size << sup.block_size;
-    //Criar diretorio raiz com ./ e ../ levando a si mesmo
+    
  
     fclose(fp);
 
